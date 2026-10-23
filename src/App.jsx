@@ -72,8 +72,28 @@ export default function App() {
   useEffect(() => {
     const toastListener = (event) => { setToast(event.detail); setTimeout(() => setToast(''), 2400); };
     const signListener = (event) => {
-      if (signatureText) addMark(event.detail.pageNumber, { id: makeId(), type: 'signature', ...event.detail.point, width: 180, height: 48, fontSize: Math.max(18, controlsRef.current.size * 2), text: signatureText, color: controlsRef.current.color, fontFamily: 'Helvetica', italic: true, sourceFamily: 'cursive' });
-      else { setSignatureDraft(''); setSignatureDialog(true); }
+      if (signatureText) {
+        const markId = makeId();
+        addMark(event.detail.pageNumber, {
+          id: markId,
+          type: 'signature',
+          ...event.detail.point,
+          width: 180,
+          height: 48,
+          fontSize: Math.max(18, controlsRef.current.size * 2),
+          text: signatureText,
+          color: controlsRef.current.color,
+          fontFamily: 'Helvetica',
+          italic: true,
+          sourceFamily: 'cursive',
+        });
+        setSelectedId(markId);
+        changeMode('select');
+        notify('Signature placed! Click and drag to reposition.');
+      } else {
+        setSignatureDraft('');
+        setSignatureDialog(true);
+      }
     };
     window.addEventListener('paper-toast', toastListener);
     window.addEventListener('paper-signature-place', signListener);
@@ -388,17 +408,57 @@ export default function App() {
     const descriptions = { select: 'Click any text or image to edit directly · Drag to move or resize · Double-click empty canvas to add text', text: 'Click a page to add styled text', highlight: 'Drag across a page to highlight', strike: 'Drag across text to strike it through', draw: 'Draw freehand on the page', rectangle: 'Drag to add a rectangle', ellipse: 'Drag to add an ellipse', line: 'Drag to draw a line', whiteout: 'Drag over page content to cover it', image: 'Choose an image, then place it on a page', link: 'Click a page to place the link above', form: 'Click a page to add the selected form field', signature: 'Click a page to place your signature' };
     setStatus(descriptions[nextMode] || 'Ready');
   }
+  function insertImageDirectly(dataUrl, aspect, targetPage = pageNumber, targetPoint = null) {
+    const width = Number(controlsRef.current.imageSize) || 160;
+    const height = Math.round(width / (aspect || 1));
+    const x = targetPoint ? Math.max(10, Math.round(targetPoint.x - width / 2)) : 100;
+    const y = targetPoint ? Math.max(10, Math.round(targetPoint.y - height / 2)) : 120;
+    const markId = makeId();
+    addMark(targetPage, {
+      id: markId,
+      type: 'image',
+      data: dataUrl,
+      x,
+      y,
+      width,
+      height,
+    });
+    setSelectedId(markId);
+    setImage(null);
+    changeMode('select');
+    notify('Image added! Drag to move or drag corners to resize.');
+  }
   function placeImage(number, point) {
     if (!image) return;
-    const width = controlsRef.current.imageSize; const height = width / (image.aspect || 1);
-    addMark(number, { id: makeId(), type: 'image', data: image.data, x: point.x - width / 2, y: point.y - height / 2, width, height });
-    setImage(null); setMode('select'); setStatus('Image added · select it to move or resize');
+    insertImageDirectly(image.data, image.aspect, number, point);
   }
   function loadImage(file) {
     if (!file) return;
-    if (!['image/png', 'image/jpeg'].includes(file.type)) return notify('Choose a PNG or JPEG image.');
+    const isImage = file.type?.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || '');
+    if (!isImage) return notify('Please choose an image file (PNG, JPG, WebP, etc.).');
     const reader = new FileReader();
-    reader.onload = () => { const preview = new Image(); preview.onload = () => { setImage({ data: reader.result, aspect: preview.width / preview.height }); changeMode('image'); }; preview.src = reader.result; };
+    reader.onload = () => {
+      const preview = new Image();
+      preview.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = preview.naturalWidth || preview.width || 300;
+          canvas.height = preview.naturalHeight || preview.height || 300;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(preview, 0, 0);
+          const pngData = canvas.toDataURL('image/png');
+          const aspect = canvas.width / (canvas.height || 1);
+          insertImageDirectly(pngData, aspect, pageNumber);
+        } catch {
+          // Fallback to direct data URL if canvas conversion fails
+          const aspect = preview.width / (preview.height || 1);
+          insertImageDirectly(reader.result, aspect, pageNumber);
+        }
+      };
+      preview.onerror = () => notify('Could not load image.');
+      preview.src = reader.result;
+    };
+    reader.onerror = () => notify('Could not read image file.');
     reader.readAsDataURL(file);
   }
   function navigatePage(number) {
@@ -475,7 +535,7 @@ export default function App() {
       <button className="button button-secondary" onClick={() => fileInputRef.current?.click()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><FolderOpen size={14} /> Open PDF</button>
       <button className="button button-primary" onClick={applyChanges} disabled={!documentState || busy} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Download size={14} /> Apply &amp; download</button>
       <input ref={fileInputRef} type="file" accept="application/pdf" hidden onChange={(event) => { openFile(event.target.files[0]); event.target.value = ''; }} />
-      <input ref={imageInputRef} type="file" accept="image/png,image/jpeg" hidden onChange={(event) => { loadImage(event.target.files[0]); event.target.value = ''; }} />
+      <input ref={imageInputRef} type="file" accept="image/*" hidden onChange={(event) => { loadImage(event.target.files[0]); event.target.value = ''; }} />
     </header>
 
     <Toolbar mode={mode} onMode={changeMode} onSign={() => { setSignatureDraft(signatureText); setSignatureDialog(true); }} onImage={() => imageInputRef.current?.click()} onOcr={runOcrOnCurrentPage} isOcrBusy={ocrBusy} controls={{ ...controls, linkUrl: controls.linkUrl || '' }} onStyle={changeStyle} onFind={() => setFindOpen(!findOpen)} onAnalyze={showAnalysis} page={pageNumber} pageCount={pageCount} onPage={navigatePage} zoom={zoom} onZoom={(value) => setZoom(Math.max(.5, Math.min(2.3, value)))} onFit={fitPage} onDelete={deleteSelection} onUndo={undo} canUndo={currentMarks.length > 0} hasPdf={!!documentState} />
@@ -498,7 +558,31 @@ export default function App() {
       </main>
     </div>
 
-    {signatureDialog && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSignatureDialog(false); }}><form className="dialog-card" onSubmit={(event) => { event.preventDefault(); if (!signatureDraft.trim()) return; setSignatureText(signatureDraft.trim()); setSignatureDialog(false); changeMode('signature'); setStatus('Signature ready · click a page to place it'); }}><p className="eyebrow">SIGNATURE</p><h2>Create a typed signature</h2><input autoFocus className="dialog-input signature-input" value={signatureDraft} onChange={(event) => setSignatureDraft(event.target.value)} placeholder="Type your name" /><div className="dialog-actions"><button type="button" className="button button-secondary" onClick={() => setSignatureDialog(false)}>Cancel</button><button className="button button-primary" type="submit">Use signature</button></div></form></div>}
+    {signatureDialog && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSignatureDialog(false); }}><form className="dialog-card" onSubmit={(event) => {
+      event.preventDefault();
+      const text = signatureDraft.trim();
+      if (!text) return;
+      setSignatureText(text);
+      setSignatureDialog(false);
+      const markId = makeId();
+      addMark(pageNumber, {
+        id: markId,
+        type: 'signature',
+        x: 100,
+        y: 160,
+        width: 180,
+        height: 48,
+        fontSize: Math.max(18, controlsRef.current.size * 2),
+        text,
+        color: controlsRef.current.color,
+        fontFamily: 'Helvetica',
+        italic: true,
+        sourceFamily: 'cursive',
+      });
+      setSelectedId(markId);
+      changeMode('select');
+      notify('Signature added to page! Drag to reposition.');
+    }}><p className="eyebrow">SIGNATURE</p><h2>Create a typed signature</h2><input autoFocus className="dialog-input signature-input" value={signatureDraft} onChange={(event) => setSignatureDraft(event.target.value)} placeholder="Type your name" /><div className="dialog-actions"><button type="button" className="button button-secondary" onClick={() => setSignatureDialog(false)}>Cancel</button><button className="button button-primary" type="submit">Use signature</button></div></form></div>}
     {analysisOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAnalysisOpen(false); }}><section className="dialog-card analysis-dialog"><p className="eyebrow">DOCUMENT INSIGHTS</p><h2>PDF analysis</h2><p className="dialog-copy">Font metadata and text runs are read from this PDF in your browser. The document is not uploaded.</p><div className="analysis-stats"><div><strong>{pageCount}</strong><span>Pages</span></div><div><strong>{fontAnalysis.runs}</strong><span>Selectable text runs</span></div><div><strong>{fontAnalysis.fonts}</strong><span>Distinct PDF fonts</span></div><div><strong>{fontAnalysis.scanned}</strong><span>Pages without text</span></div></div><div className="font-table-wrap"><table className="font-table"><thead><tr><th>PDF font</th><th>Family</th><th>Style</th><th>Size</th><th>Runs</th><th>Pages</th></tr></thead><tbody>{fontAnalysis.groups.map((group) => <tr key={`${group.fontName}-${group.size}-${group.bold}-${group.italic}`}><td>{group.fontName}</td><td>{group.family}</td><td>{group.bold ? 'Bold' : 'Regular'}{group.italic ? ' italic' : ''}</td><td>{group.size} pt</td><td>{group.count}</td><td>{[...group.pages].sort((a, b) => a - b).join(', ')}</td></tr>)}</tbody></table>{!fontAnalysis.groups.length && <p className="empty-analysis">Open a text PDF to inspect its fonts.</p>}</div><div className="dialog-actions"><button className="button button-primary" onClick={() => setAnalysisOpen(false)}>Done</button></div></section></div>}
   </div>;
 }

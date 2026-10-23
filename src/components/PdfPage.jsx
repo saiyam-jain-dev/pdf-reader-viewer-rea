@@ -88,11 +88,21 @@ export function PdfPage({ document, pageNumber, zoom, marks, selectedId, mode, i
       if (mark.type === 'strike') { context.strokeStyle = mark.color; context.lineWidth = 2 * zoom * ratio; context.beginPath(); context.moveTo(x, y + height / 2); context.lineTo(x + width, y + height / 2); context.stroke(); }
       if (mark.type === 'line') { context.strokeStyle = mark.color; context.lineWidth = 2 * zoom * ratio; context.beginPath(); context.moveTo(x, y); context.lineTo(x + width, y + height); context.stroke(); }
       if (mark.type === 'image' && mark.data) {
-        const image = new Image(); image.onload = () => { context.drawImage(image, x, y, width, height); if (mark.id === selectedId) drawSelection(context, x, y, width, height, ratio); }; image.src = mark.data;
+        const image = new Image();
+        image.src = mark.data;
+        const renderImg = () => {
+          context.drawImage(image, x, y, width, height);
+          if (mark.id === selectedId) drawSelection(context, x, y, width, height, ratio, true);
+        };
+        if (image.complete) {
+          renderImg();
+        } else {
+          image.onload = renderImg;
+        }
       }
       if (mark.type === 'link') { context.strokeStyle = '#3976ba'; context.strokeRect(x, y, width, height); context.fillStyle = '#3976ba'; context.font = `${10 * zoom * ratio}px sans-serif`; context.fillText(mark.url, x, y + height * .7, Math.max(width, 50)); }
       if (mark.type === 'field') { context.fillStyle = 'rgba(236,245,236,.7)'; context.strokeStyle = '#6b8c74'; context.fillRect(x, y, width, height); context.strokeRect(x, y, width, height); context.fillStyle = '#333'; context.font = `${10 * zoom * ratio}px sans-serif`; context.fillText(mark.fieldType === 'checkbox' ? '□' : mark.label, x, y + height * .7, Math.max(width, 30)); }
-      if (mark.id === selectedId && mark.type !== 'image') drawSelection(context, x, y, width, height, ratio);
+      if (mark.id === selectedId && mark.type !== 'image') drawSelection(context, x, y, width, height, ratio, false);
       context.restore();
     }
   }, [layout, marks, selectedId, zoom]);
@@ -101,7 +111,7 @@ export function PdfPage({ document, pageNumber, zoom, marks, selectedId, mode, i
     context.save();
     context.strokeStyle = '#2563eb';
     context.lineWidth = 1.5 * ratio;
-    context.setLineDash([]);
+    context.setLineDash(isImage ? [] : [4 * ratio, 2 * ratio]);
     context.strokeRect(x, y, width, height);
 
     if (isImage) {
@@ -293,25 +303,9 @@ export function PdfPage({ document, pageNumber, zoom, marks, selectedId, mode, i
     });
   }
 
-  function handleCanvasClick(event) {
-    if (pointerHandledRef.current) { pointerHandledRef.current = false; return; }
-    if (!layout || event.target.closest('.inline-text-editor')) return;
-    const point = pointFromEvent(event);
-    if (mode === 'text') onTextStart(pageNumber, { isNew: true, x: point.x, y: point.y, width: 280, height: 48, size: style.size, family: style.fontFamily, bold: style.bold, italic: style.italic, text: '' });
-    else if (mode === 'image' && imageData) onPlaceImage(pageNumber, point);
-    else if (mode === 'link') onAddMark(pageNumber, { id: uid(), type: 'link', ...point, width: 150, height: 24, url: style.linkUrl });
-    else if (mode === 'form') {
-      const small = style.fieldType === 'checkbox' || style.fieldType === 'radio';
-      onAddMark(pageNumber, { id: uid(), type: 'field', fieldType: style.fieldType, ...point, width: small ? 22 : 180, height: small ? 22 : 34, name: `${style.fieldName || 'field'}_${pageNumber}_${marks.length + 1}`, label: style.fieldName || 'field', value: style.fieldValue });
-    } else if (mode === 'signature') window.dispatchEvent(new CustomEvent('paper-signature-place', { detail: { pageNumber, point } }));
-    else if (mode === 'highlight' || mode === 'whiteout' || mode === 'rectangle' || mode === 'ellipse' || mode === 'line' || mode === 'strike') {
-      onAddMark(pageNumber, { id: uid(), type: mode, ...point, width: 70, height: 18, color: style.color });
-    } else if (mode === 'draw') onAddMark(pageNumber, { id: uid(), type: 'draw', points: [point, { x: point.x + 1, y: point.y + 1 }], color: style.color, lineWidth: Math.max(1, style.size * .16) });
-  }
-
   const editingThisPage = activeText?.pageNumber === pageNumber;
   const editingBox = activeText?.run;
-  return <div className="pdf-page" ref={pageRef} style={layout ? { width: layout.width, height: layout.height } : undefined} data-page={pageNumber} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onDoubleClick={handleDoubleClick} onClick={handleCanvasClick}>
+  return <div className="pdf-page" ref={pageRef} style={layout ? { width: layout.width, height: layout.height } : undefined} data-page={pageNumber} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onDoubleClick={handleDoubleClick}>
     <canvas ref={baseCanvasRef} className="page-canvas" />
     <canvas ref={overlayRef} className="marks-canvas" />
     {editingThisPage && editingBox && <>

@@ -1,5 +1,8 @@
 # Paper PDF
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Online-brightgreen?style=flat-square)](https://saiyam-jain-dev.github.io/pdf-reader-viewer-rea/)
+**Live App:** [https://saiyam-jain-dev.github.io/pdf-reader-viewer-rea/](https://saiyam-jain-dev.github.io/pdf-reader-viewer-rea/)
+
 A local-first PDF reader and editor built with React, Vite, PDF.js, and pdf-lib. Open a document in your browser, make edits and annotations, and export a separate edited copy.
 
 ## Features
