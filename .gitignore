@@ -1,0 +1,4 @@
+node_modules/
+.paper-build/
+dist/
+*.log
