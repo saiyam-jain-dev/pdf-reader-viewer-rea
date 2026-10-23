@@ -1,0 +1,100 @@
+PROJECT HANDOFF — Paper PDF
+Updated: 2026-10-23
+
+PURPOSE
+This file is a handoff for another AI developer if the current conversation or its context expires. Read this file, then inspect the actual repository and git diff before changing code. It summarizes current intent and status; repository files are authoritative if something differs.
+
+PROJECT
+- Local-first PDF reader/editor built with React, Vite, PDF.js, and pdf-lib.
+- Workspace/repository: C:\Users\Sammy\Documents\ChatGPT\pdf reader
+- App brand: Paper PDF (package name: paper-pdf-editor).
+- User asked to refactor the old monolithic advanced.js app into a proper React/Next-like app and use REA reverse engineering. React + Vite was selected (no Next server needed for this client-side editor).
+- REA static source analysis had been performed on the legacy app. Evidence ID: ev_68dc218c8972775b0f63fdeb2b59956a2aa68e275a83c12d1c582889e4d507df. It found the main behavior concentrated in advanced.js and index.html. This was static source analysis, not runtime behavior analysis.
+
+USER WORKFLOW PREFERENCES
+- Do not commit or push changes unless the user explicitly asks. They previously asked to push each change, then corrected that preference to commit only when they say. The current standing preference is no automatic commits/pushes.
+- User wants a usable editor, not decorative controls. Verify toolbar actions work and report any limitations honestly.
+- User wants inline PDF text editing (click text and edit in place), with the selected text's font/style/size/color loaded into browser-side editor state and controls. Avoid opening a separate dialog for editing text.
+- Their prior bug report: new text appeared over original instead of replacing it, and typography changed. Existing-text edits should mask the original run, then draw replacement text at its position using the best available style match. Maintain this behavior and do not regress it.
+
+CURRENT IMPLEMENTATION
+- index.html boots src/main.jsx.
+- src/main.jsx mounts React App and styles.
+- src/App.jsx coordinates file/page state, toolbar, text editing, marks, search/replace, analysis, signatures, and export.
+- src/components/Toolbar.jsx contains tool/style/navigation controls.
+- src/components/PdfPage.jsx renders pages, clickable text runs, inline editing, selection, and annotation overlays.
+- src/components/PageThumbnail.jsx renders page previews.
+- src/hooks/usePdfDocument.js loads PDFs and creates blank documents.
+- src/lib/pdfEngine.js uses PDF.js and pdf-lib for parsing/export.
+- src/styles.css is the UI stylesheet.
+- vite.config.js configures dev/build and chunking.
+- README.md documents features and run commands.
+- Legacy advanced.js has been deleted as part of the refactor.
+- Dependencies are in package.json/package-lock.json: react, react-dom, vite, pdfjs-dist, pdf-lib.
+- Production build output goes to ignored .paper-build/.
+
+FEATURES CURRENTLY IMPLEMENTED (inspect source to confirm exact behavior)
+- Open local PDF / drag-drop, blank document, page thumbnails, page navigation, zoom and fit.
+- Inline existing text replacement for selectable PDF text; styled new text.
+- Style controls: text size, font family, bold, italic, color.
+- Search and replace text runs, PDF font/text analysis.
+- Image insert (PNG/JPEG), selection/move/resize/delete.
+- Signature (typed), links, form fields, highlight, strike, draw, whiteout, rectangle, ellipse, line.
+- Undo last page edit and download an exported copy.
+- Files are processed client-side.
+
+KNOWN LIMITATIONS / CAUTION
+- Scanned pages have no selectable text; OCR is not implemented.
+- Text replacement rebuilds affected pages as high-resolution page images with the original covered before the new text is painted, so original text is removed from that exported page's content stream. A replaced page is flattened; links, forms, and selectable text on that page may be lost. White covers can look wrong on colored/patterned backgrounds.
+- Existing embedded PDF fonts cannot always be reused. Export approximates with standard PDF fonts, so exact appearance is not guaranteed.
+- Many annotations/text are flattened when exported. Verify form fields/links and image export details in src/lib/pdfEngine.js before extending.
+- Do not claim full Adobe/Sejda parity.
+
+RECENT FIXES AND CHECKS
+- Fixed inline new-text editing: clicking the page now prevents the page pointer default from stealing focus from the newly created inline input. Browser verification on 2026-10-23: clicking Text mode and the blank page produced a focused .inline-text-editor; entering text and Enter committed one unsaved edit.
+- Fixed thumbnail race under React StrictMode by checking the effect's cancelled flag after awaiting document.getPage().
+- Live test with `C:\Users\Sammy\Downloads\cash-receipt-form.pdf` (2026-10-23): it is a scanned/image-based form, so Edit text correctly reports that the page has no selectable text. Adding styled text on that scan worked; the inline editor showed the selected bold style, and the green check saved it.
+- Live test discovered style-only edits to existing selectable text were not persisted if the text string stayed the same. `commitText()` now compares font family, size, bold, italic, and sampled color as well as the string before deciding whether to create a replacement mark. This needs a selectable-text PDF follow-up because the cash receipt is scanned.
+- Live test discovered PDF.js could detach the source buffer used by pdf-lib. `openPdf()` now gives PDF.js a cloned ArrayBuffer and keeps the original for export.
+- The cash receipt is encrypted/flagged as encrypted. Export now asks pdf-lib to ignore the encryption flag. An edited copy exported successfully to `C:\Users\Sammy\Downloads\cash-receipt-form-edited.pdf`, and reopening it in the app visibly showed the added text over the receipt. The input file remains unchanged.
+- Fixed PDF Export (Vector Preservation): Eliminated the raster canvas screenshot export hack. Export now copies all pages natively using pdf-lib (output.copyPages), preserving 100% of the original vector curves, fonts, sharpness, and metadata. Text replacements now draw an opaque vector rectangle over the old text coordinates and draw crisp vector text using standard PDF fonts at the exact baseline.
+- Fixed Text Run Grouping: `readTextRuns()` now groups adjacent and space-separated text items sharing the same baseline and font into coherent phrases/lines instead of fragmented individual words or letters.
+- Fixed Inline Text Editor Zoom Bug: In `PdfPage.jsx`, inline editor inputs and save checkmarks were using unzoomed offsets on a zoomed canvas; their positions and dimensions are now correctly multiplied by `zoom` so the input box stays aligned with text at any zoom level.
+- Added Paper Background Sampling: `sampleBackgroundColor()` samples the canvas background behind text so replacement masks blend with paper tone instead of forcing plain #ffffff.
+- Fixed Typography & Color Drift: Added `resolveFontFamily()` with safe standard CSS chains so Canvas never fails and resets to 10px default font. Added luminance-sorted contrast sampling in `sampleTextColor()` to extract the exact text ink color without color shifts or rounding steps. Saved exact text baseline offsets (`baselineOffset`) so edited text stays on the original baseline down to the pixel.
+- Added Direct Click-to-Edit & Modern Interaction: Eliminated the need to switch back and forth between "Select" and "Edit text" tools. Users can now directly click any text run or text mark to edit it immediately in place, click any image to select/move/resize with 4 corner handles, double-click empty canvas to add a new text box, and enjoy dynamic hover cursors (I-beam text cursor over text, move/resize cursor over images).
+- Integrated @pdf-lib/fontkit: Registered fontkit in `src/lib/pdfEngine.js` for custom TrueType/OpenType font embedding support in PDF-lib.
+- Integrated Tesseract.js Client-Side OCR: Created `src/lib/ocrEngine.js` with WebAssembly OCR. Users can click "OCR Page" in the toolbar to automatically recognize text coordinates and words on scanned/image-based documents, converting them into editable text runs.
+- Modern Iconography & UI (`lucide-react`): Upgraded all toolbar controls, tools, and header buttons with sleek vector Lucide icons.
+- Fixed Typography Ink Bleed & Grey Washout: Solved bug where edited text (such as "New York City" line) faded to grey (#858585). `sampleTextColor()` now extracts true ink strokes (`lum <= Math.min(160, minLum + 40)`) without averaging white paper pixels, and clamps standard document dark ink (< 90 RGB) to solid crisp black `#111111`. `active.originalColor` preserves the sampled color during inline editing so re-sampling never dilutes ink. `PdfPage.jsx` explicitly sets `context.textBaseline = 'alphabetic'` and renders crisp solid `#111111`.
+- Tabbed Toolbar Organization: Replaced the flat, cluttered 20+ toolbar buttons with 3 clean segmented tabs (`Edit` [default], `Annotate`, `Insert & Forms`) styled like modern editors (Acrobat Pro DC). Persistent right-side controls (Undo, Delete, Find, Analyze, Page Navigation, Zoom) remain accessible across all tabs.
+- Production build verified with `npm run build` (vite v8.3.5, 0 errors).
+
+DEVELOPMENT
+- Node requirement documented in README: Node 20.19+ or 22.12+.
+- Install: npm install
+- Dev: npm run dev
+- Production build: npm run build
+- Preview: npm run preview
+- Review working changes: git status --short; inspect diffs. Do not commit/push unless user asks.
+
+GIT STATE AT HANDOFF
+- There are uncommitted modifications from the React refactor. Last observed status:
+  M README.md
+  D advanced.js
+  M index.html
+  ?? .gitignore
+  ?? package-lock.json
+  ?? package.json
+  ?? src/
+  ?? vite.config.js
+  This state listing predates adding PROJECT_STATE.txt; expect it to appear untracked too.
+- Do not reset or discard these changes. Do not push automatically.
+
+NEXT STEPS FOR A CONTINUING DEVELOPER
+1. Inspect git status and the source, especially src/App.jsx, src/components/PdfPage.jsx, src/lib/pdfEngine.js, and README.md.
+2. Exercise existing selectable-text replacement and style-only changes with a text-based PDF (open, select existing text, modify font/bold/color without changing text, save, export, reopen exported file, visually compare). The cash receipt PDF in Downloads is scanned and cannot validate selecting existing text.
+3. Audit every toolbar button and export operation, fix any nonfunctional controls, and keep limitations clear.
+4. For text replacement, preserve layout/position/weight/italic/direction/color as much as possible. Do not assert exact embedded font matching unless implemented and verified.
+5. Run `npm run build` after code changes. Do not add or run a test suite unless the user asks; manual browser verification and the production build have been used.
+6. Never commit or push unless explicitly requested.
